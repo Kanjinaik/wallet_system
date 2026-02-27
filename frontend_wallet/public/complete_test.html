@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete Authentication Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        button { padding: 12px 24px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-warning { background: #ffc107; color: black; }
+        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 4px solid #007bff; }
+        .success { color: #28a745; border-left-color: #28a745; }
+        .error { color: #dc3545; border-left-color: #dc3545; }
+        .warning { color: #ffc107; border-left-color: #ffc107; }
+        .info { color: #17a2b8; border-left-color: #17a2b8; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Wallet System Complete Test</h1>
+        <p>This page tests the entire authentication and API flow.</p>
+        
+        <div class="grid">
+            <button onclick="testLogin()" class="btn-primary">🔑 Test Login</button>
+            <button onclick="testWallets()" class="btn-success">💰 Test Wallets</button>
+            <button onclick="testWithdraw()" class="btn-warning">💸 Test Withdraw</button>
+            <button onclick="clearStorage()" class="btn-danger">🗑️ Clear Storage</button>
+        </div>
+        
+        <div id="status"></div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:8000/api';
+        
+        function showStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        async function testLogin() {
+            showStatus('🔄 Testing login...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'password123'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.token) {
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    
+                    document.getElementById('result').innerHTML = `
+                        <div class="success">
+                            <h3>✅ Login Successful!</h3>
+                            <p><strong>User:</strong> ${data.user.name} (${data.user.email})</p>
+                            <p><strong>Token:</strong> ${data.token.substring(0, 50)}...</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('✅ Login successful! Token stored.', 'success');
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">
+                            <h3>❌ Login Failed</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('❌ Login failed. Check credentials.', 'error');
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h3>❌ Network Error</h3>
+                        <pre>${error.message}</pre>
+                    </div>
+                `;
+                showStatus('❌ Network error. Check if backend is running.', 'error');
+            }
+        }
+
+        async function testWallets() {
+            showStatus('🔄 Testing wallets endpoint...', 'info');
+            
+            try {
+                const token = localStorage.getItem('token');
+                
+                if (!token) {
+                    document.getElementById('result').innerHTML = `
+                        <div class="warning">
+                            <h3>⚠️ No Authentication Token</h3>
+                            <p>Please login first to get a token.</p>
+                        </div>
+                    `;
+                    showStatus('⚠️ No token found. Please login first.', 'warning');
+                    return;
+                }
+
+                const response = await fetch(`${API_BASE}/wallets`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const totalBalance = data.reduce((sum, wallet) => sum + parseFloat(wallet.balance || 0), 0);
+                    
+                    document.getElementById('result').innerHTML = `
+                        <div class="success">
+                            <h3>✅ Wallets Retrieved Successfully!</h3>
+                            <p><strong>Total Wallets:</strong> ${data.length}</p>
+                            <p><strong>Total Balance:</strong> ₹${totalBalance.toFixed(2)}</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus(`✅ Success! Found ${data.length} wallets with total balance ₹${totalBalance.toFixed(2)}`, 'success');
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">
+                            <h3>❌ Wallets Request Failed</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('❌ Failed to retrieve wallets.', 'error');
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h3>❌ Network Error</h3>
+                        <pre>${error.message}</pre>
+                    </div>
+                `;
+                showStatus('❌ Network error during wallets request.', 'error');
+            }
+        }
+
+        async function testWithdraw() {
+            showStatus('🔄 Testing withdraw endpoint...', 'info');
+            
+            try {
+                const token = localStorage.getItem('token');
+                
+                if (!token) {
+                    document.getElementById('result').innerHTML = `
+                        <div class="warning">
+                            <h3>⚠️ No Authentication Token</h3>
+                            <p>Please login first to get a token.</p>
+                        </div>
+                    `;
+                    showStatus('⚠️ No token found. Please login first.', 'warning');
+                    return;
+                }
+
+                const withdrawData = {
+                    wallet_id: 1, // Assuming wallet ID 1 exists
+                    amount: 100,
+                    bank_account: '1234567890',
+                    ifsc_code: 'SBIN0000123',
+                    account_holder_name: 'Test User'
+                };
+
+                const response = await fetch(`${API_BASE}/withdraw`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify(withdrawData)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('result').innerHTML = `
+                        <div class="success">
+                            <h3>✅ Withdraw Request Successful!</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('✅ Withdraw request submitted successfully!', 'success');
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">
+                            <h3>❌ Withdraw Request Failed</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('❌ Failed to submit withdraw request.', 'error');
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h3>❌ Network Error</h3>
+                        <pre>${error.message}</pre>
+                    </div>
+                `;
+                showStatus('❌ Network error during withdraw request.', 'error');
+            }
+        }
+
+        function clearStorage() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            document.getElementById('result').innerHTML = `
+                <div class="info">
+                    <h3>🗑️ Storage Cleared</h3>
+                    <p>Authentication tokens have been removed from localStorage.</p>
+                </div>
+            `;
+            showStatus('✅ Storage cleared successfully.', 'success');
+        }
+
+        // Check authentication status on load
+        window.onload = function() {
+            const token = localStorage.getItem('token');
+            const user = localStorage.getItem('user');
+            
+            if (token && user) {
+                const userData = JSON.parse(user);
+                showStatus(`✅ Already logged in as ${userData.name}`, 'success');
+            } else {
+                showStatus('ℹ️ Not logged in. Please login to test the system.', 'info');
+            }
+        };
+    </script>
+</body>
+</html>

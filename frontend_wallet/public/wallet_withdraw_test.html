@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wallet Withdraw Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        button { padding: 12px 24px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-warning { background: #ffc107; color: black; }
+        .btn-danger { background: #dc3545; color: white; }
+        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 4px solid #007bff; }
+        .success { color: #28a745; border-left-color: #28a745; }
+        .error { color: #dc3545; border-left-color: #dc3545; }
+        .warning { color: #ffc107; border-left-color: #ffc107; }
+        .info { color: #17a2b8; border-left-color: #17a2b8; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .wallet-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .balance { font-size: 24px; font-weight: bold; color: #28a745; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💰 Wallet to Bank Transfer Test</h1>
+        <p>Test the complete wallet withdrawal functionality.</p>
+        
+        <div>
+            <button onclick="login()" class="btn-primary">🔑 Login</button>
+            <button onclick="getWallets()" class="btn-success">💰 Get Wallets</button>
+            <button onclick="testWithdraw()" class="btn-warning">💸 Test Withdraw</button>
+            <button onclick="clearStorage()" class="btn-danger">🗑️ Clear</button>
+        </div>
+        
+        <div id="status"></div>
+        <div id="wallets"></div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:8000/api';
+        let currentToken = null;
+        let wallets = [];
+        
+        function showStatus(message, type = 'info') {
+            document.getElementById('status').innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        async function login() {
+            showStatus('🔄 Logging in...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'password123'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.token) {
+                    currentToken = data.token;
+                    localStorage.setItem('token', currentToken);
+                    
+                    document.getElementById('result').innerHTML = `
+                        <div class="success">
+                            <h3>✅ Login Successful!</h3>
+                            <p><strong>User:</strong> ${data.user.name}</p>
+                            <p><strong>Email:</strong> ${data.user.email}</p>
+                        </div>
+                    `;
+                    showStatus('✅ Login successful! Ready to test withdrawals.', 'success');
+                    
+                    // Auto-get wallets
+                    getWallets();
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">
+                            <h3>❌ Login Failed</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('❌ Login failed.', 'error');
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h3>❌ Network Error</h3>
+                        <pre>${error.message}</pre>
+                    </div>
+                `;
+                showStatus('❌ Network error.', 'error');
+            }
+        }
+
+        async function getWallets() {
+            showStatus('🔄 Fetching wallets...', 'info');
+            
+            const token = currentToken || localStorage.getItem('token');
+            if (!token) {
+                showStatus('⚠️ Please login first.', 'warning');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/wallets`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    wallets = data;
+                    displayWallets();
+                    showStatus(`✅ Found ${wallets.length} wallets`, 'success');
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">
+                            <h3>❌ Failed to get wallets</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('❌ Failed to get wallets.', 'error');
+                }
+            } catch (error) {
+                showStatus('❌ Network error.', 'error');
+            }
+        }
+
+        function displayWallets() {
+            const walletsDiv = document.getElementById('wallets');
+            
+            if (wallets.length === 0) {
+                walletsDiv.innerHTML = '<p class="warning">No wallets found.</p>';
+                return;
+            }
+            
+            let html = '<h3>💼 Available Wallets</h3>';
+            wallets.forEach(wallet => {
+                html += `
+                    <div class="wallet-card">
+                        <h4>${wallet.name} ${wallet.type === 'main' ? '(Main)' : '(Sub)'}</h4>
+                        <div class="balance">₹${parseFloat(wallet.balance).toFixed(2)}</div>
+                        <p>Status: ${wallet.is_frozen ? '❌ Frozen' : '✅ Active'}</p>
+                        ${!wallet.is_frozen ? `
+                            <button onclick="withdrawFromWallet(${wallet.id})" class="btn-success">
+                                💸 Withdraw from this wallet
+                            </button>
+                        ` : '<p class="error">Cannot withdraw from frozen wallet</p>'}
+                    </div>
+                `;
+            });
+            
+            walletsDiv.innerHTML = html;
+        }
+
+        async function withdrawFromWallet(walletId) {
+            const wallet = wallets.find(w => w.id === walletId);
+            if (!wallet) return;
+            
+            if (parseFloat(wallet.balance) < 100) {
+                showStatus('❌ Insufficient balance (minimum ₹100)', 'error');
+                return;
+            }
+            
+            const amount = prompt(`Enter withdrawal amount (Available: ₹${wallet.balance}, Minimum: ₹100):`, '100');
+            if (!amount || amount <= 0) return;
+            
+            if (parseFloat(amount) > parseFloat(wallet.balance)) {
+                showStatus('❌ Amount exceeds available balance', 'error');
+                return;
+            }
+            
+            await performWithdrawal(walletId, amount);
+        }
+
+        async function testWithdraw() {
+            if (wallets.length === 0) {
+                showStatus('⚠️ Please get wallets first.', 'warning');
+                return;
+            }
+            
+            const activeWallet = wallets.find(w => !w.is_frozen && parseFloat(w.balance) >= 100);
+            if (!activeWallet) {
+                showStatus('❌ No active wallet with sufficient balance', 'error');
+                return;
+            }
+            
+            await performWithdrawal(activeWallet.id, 100);
+        }
+
+        async function performWithdrawal(walletId, amount) {
+            showStatus('🔄 Processing withdrawal...', 'info');
+            
+            const token = currentToken || localStorage.getItem('token');
+            if (!token) {
+                showStatus('⚠️ Please login first.', 'warning');
+                return;
+            }
+            
+            const withdrawData = {
+                wallet_id: walletId,
+                amount: amount,
+                bank_account: '1234567890123456',
+                ifsc_code: 'SBIN0000123',
+                account_holder_name: 'Test User'
+            };
+            
+            try {
+                const response = await fetch(`${API_BASE}/withdraw`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify(withdrawData)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('result').innerHTML = `
+                        <div class="success">
+                            <h3>✅ Withdrawal Successful!</h3>
+                            <p><strong>Amount:</strong> ₹${amount}</p>
+                            <p><strong>Transaction ID:</strong> ${data.transaction.reference}</p>
+                            <p><strong>Status:</strong> ${data.transaction.status}</p>
+                            <p><strong>Processing Time:</strong> 24-48 hours</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('✅ Withdrawal processed successfully!', 'success');
+                    
+                    // Refresh wallets to show updated balance
+                    getWallets();
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="error">
+                            <h3>❌ Withdrawal Failed</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                    showStatus('❌ Withdrawal failed.', 'error');
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="error">
+                        <h3>❌ Network Error</h3>
+                        <pre>${error.message}</pre>
+                    </div>
+                `;
+                showStatus('❌ Network error.', 'error');
+            }
+        }
+
+        function clearStorage() {
+            localStorage.removeItem('token');
+            currentToken = null;
+            wallets = [];
+            document.getElementById('wallets').innerHTML = '';
+            document.getElementById('result').innerHTML = '';
+            showStatus('✅ Storage cleared.', 'success');
+        }
+
+        // Check if already logged in
+        window.onload = function() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                currentToken = token;
+                showStatus('✅ Already logged in. Click "Get Wallets" to continue.', 'success');
+            } else {
+                showStatus('ℹ️ Please login to test wallet withdrawals.', 'info');
+            }
+        };
+    </script>
+</body>
+</html>

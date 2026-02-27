@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wallet Dropdown Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        button { padding: 12px 24px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        select { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💼 Wallet Dropdown Test</h1>
+        <p>Test if wallet options appear in dropdown</p>
+        
+        <button onclick="testWallets()" class="btn-primary">🔄 Test Wallet Dropdown</button>
+        <button onclick="testWithdraw()" class="btn-success">💸 Test Withdraw</button>
+        
+        <div id="result"></div>
+        
+        <h3>Wallet Selection:</h3>
+        <select id="walletSelect">
+            <option value="">Loading wallets...</option>
+        </select>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:8000/api';
+        let currentToken = null;
+        let wallets = [];
+        
+        async function testWallets() {
+            document.getElementById('result').innerHTML = '<p>🔄 Testing wallet fetch...</p>';
+            
+            try {
+                // Login first
+                const loginResponse = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'password123'
+                    })
+                });
+                
+                const loginData = await loginResponse.json();
+                if (!loginResponse.ok) {
+                    document.getElementById('result').innerHTML = `<p class="error">❌ Login failed: ${loginData.message}</p>`;
+                    return;
+                }
+                
+                currentToken = loginData.token;
+                
+                // Get wallets
+                const walletsResponse = await fetch(`${API_BASE}/wallets`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + currentToken,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const walletsData = await walletsResponse.json();
+                if (!walletsResponse.ok) {
+                    document.getElementById('result').innerHTML = `<p class="error">❌ Failed to get wallets: ${walletsData.message}</p>`;
+                    return;
+                }
+                
+                wallets = walletsData;
+                populateDropdown(wallets);
+                
+                document.getElementById('result').innerHTML = `
+                    <div class="success">
+                        <h3>✅ Success!</h3>
+                        <p>Found ${wallets.length} wallets:</p>
+                        <pre>${JSON.stringify(wallets, null, 2)}</pre>
+                    </div>
+                `;
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+        
+        function populateDropdown(wallets) {
+            const select = document.getElementById('walletSelect');
+            select.innerHTML = '<option value="">Choose a wallet</option>';
+            
+            wallets.forEach(wallet => {
+                const option = document.createElement('option');
+                option.value = wallet.id;
+                option.textContent = `${wallet.type === 'main' ? '🏦 MAIN WALLET: ' : '💼 '}${wallet.name} - Balance: ₹${parseFloat(wallet.balance || 0).toFixed(2)}`;
+                if (wallet.type === 'main') {
+                    option.style.fontWeight = 'bold';
+                    option.style.color = '#007bff';
+                }
+                select.appendChild(option);
+            });
+            
+            if (wallets.length === 0) {
+                select.innerHTML = '<option value="">No wallets available</option>';
+            }
+        }
+        
+        async function testWithdraw() {
+            const selectedWalletId = document.getElementById('walletSelect').value;
+            if (!selectedWalletId) {
+                alert('Please select a wallet first');
+                return;
+            }
+            
+            const selectedWallet = wallets.find(w => w.id == selectedWalletId);
+            if (!selectedWallet) {
+                alert('Invalid wallet selection');
+                return;
+            }
+            
+            const amount = prompt(`Enter withdrawal amount (Available: ₹${selectedWallet.balance}):`, '100');
+            if (!amount || amount <= 0) return;
+            
+            if (parseFloat(amount) > parseFloat(selectedWallet.balance)) {
+                alert('Amount exceeds available balance');
+                return;
+            }
+            
+            try {
+                const withdrawResponse = await fetch(`${API_BASE}/withdraw`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': 'Bearer ' + currentToken
+                    },
+                    body: JSON.stringify({
+                        wallet_id: selectedWalletId,
+                        amount: amount,
+                        bank_account: '1234567890123456',
+                        ifsc_code: 'SBIN0000123',
+                        account_holder_name: 'Test User'
+                    })
+                });
+                
+                const withdrawData = await withdrawResponse.json();
+                
+                if (withdrawResponse.ok) {
+                    alert(`✅ Withdrawal successful! Transaction ID: ${withdrawData.transaction.reference}`);
+                    testWallets(); // Refresh wallets
+                } else {
+                    alert(`❌ Withdrawal failed: ${withdrawData.message}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        // Auto-test on page load
+        window.onload = function() {
+            testWallets();
+        };
+    </script>
+</body>
+</html>

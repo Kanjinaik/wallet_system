@@ -1,0 +1,139 @@
+:root {
+  --ui-bg: radial-gradient(circle at 0% 0%, #ecf3ff 0%, #f6f9ff 48%, #eef4ff 100%);
+  --ui-surface: #ffffff;
+  --ui-surface-soft: #f8fbff;
+  --ui-border: #dbe5f4;
+  --ui-text: #0f1f3d;
+  --ui-muted: #5f7191;
+  --ui-primary: #205dd8;
+  --ui-primary-dark: #1547b4;
+  --ui-shadow-sm: 0 8px 20px rgba(20, 49, 96, 0.08);
+  --ui-shadow-md: 0 16px 32px rgba(20, 49, 96, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--ui-text);
+  background: var(--ui-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.card,
+.modal-content,
+.table,
+.list-group-item {
+  border-color: var(--ui-border);
+}
+
+.form-control,
+.form-select {
+  border-radius: 10px;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: #7ea6f2;
+  box-shadow: 0 0 0 0.2rem rgba(32, 93, 216, 0.12);
+}
+
+.btn {
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.btn-primary {
+  border-color: var(--ui-primary);
+  background: linear-gradient(135deg, var(--ui-primary) 0%, var(--ui-primary-dark) 100%);
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  border-color: var(--ui-primary-dark);
+  background: linear-gradient(135deg, #1b53c3 0%, #103c97 100%);
+}
+
+.table thead th {
+  background: #eff5ff;
+  color: #1a3d7d;
+  font-weight: 700;
+  border-bottom-color: var(--ui-border);
+}
+
+.table > :not(caption) > * > * {
+  border-bottom-color: #e8eef8;
+}
+
+.Toastify__toast {
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  box-shadow: var(--ui-shadow-sm);
+}
+
+.Toastify__toast-theme--light {
+  background: var(--ui-surface);
+  color: var(--ui-text);
+}
+
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .container,
+  .container-fluid {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .card {
+    border-radius: 12px;
+  }
+
+  .table {
+    font-size: 0.88rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 13.5px;
+  }
+
+  .btn {
+    min-height: 38px;
+    padding: 0.42rem 0.72rem;
+  }
+
+  .form-control,
+  .form-select {
+    min-height: 38px;
+    font-size: 0.9rem;
+  }
+
+  .Toastify__toast {
+    margin: 0 8px;
+    border-radius: 10px;
+  }
+}
