@@ -8,20 +8,34 @@ use App\Models\CommissionTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Wallet;
+use App\Models\WithdrawRequest;
+use App\Services\CommissionSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 
 class SuperDistributorController extends Controller
 {
     public function dashboard(Request $request)
     {
         $super = $request->user();
-        $distributors = $this->ownedDistributorsQuery($super->id)->with('wallets')->orderBy('created_at', 'desc')->get();
+        $distributorsQuery = $this->ownedDistributorsQuery($super->id)
+            ->with('wallets');
+
+        if (Schema::hasTable('commission_overrides')) {
+            $distributorsQuery->with('commissionOverride');
+        }
+
+        $distributors = $distributorsQuery
+            ->orderBy('created_at', 'desc')
+            ->get();
+        $commissionSummary = CommissionSummaryService::forUser($super->id);
 
         return response()->json([
             'wallet_balance' => (float) $super->wallets()->sum('balance'),
-            'commission_earned' => (float) CommissionTransaction::where('user_id', $super->id)->sum('commission_amount'),
+            'commission_earned' => $commissionSummary['earned'],
+            'commission_available' => $commissionSummary['available'],
             'total_distributors' => $distributors->count(),
             'super_distributor_profile' => [
                 'id' => $super->id,
@@ -31,39 +45,24 @@ class SuperDistributorController extends Controller
                 'date_of_birth' => $super->date_of_birth,
                 'is_active' => (bool) $super->is_active,
             ],
-            'distributors' => $distributors->map(function ($distributor) {
-                return [
-                    'id' => $distributor->id,
-                    'name' => $distributor->name,
-                    'email' => $distributor->email,
-                    'phone' => $distributor->phone,
-                    'date_of_birth' => $distributor->date_of_birth,
-                    'is_active' => (bool) $distributor->is_active,
-                    'balance' => (float) $distributor->wallets->sum('balance'),
-                    'total_retailers' => User::where('role', 'retailer')->where('distributor_id', $distributor->id)->count(),
-                ];
-            })->values(),
+            'distributors' => $distributors->map(fn ($distributor) => $this->formatDistributorPayload($distributor))->values(),
         ]);
     }
 
     public function distributors(Request $request)
     {
-        $distributors = $this->ownedDistributorsQuery($request->user()->id)
-            ->with('wallets')
+        $distributorsQuery = $this->ownedDistributorsQuery($request->user()->id)
+            ->with('wallets');
+
+        if (Schema::hasTable('commission_overrides')) {
+            $distributorsQuery->with('commissionOverride');
+        }
+
+        $distributors = $distributorsQuery
             ->orderBy('created_at', 'desc')
             ->get()
-            ->map(function ($distributor) {
-                return [
-                    'id' => $distributor->id,
-                    'name' => $distributor->name,
-                    'email' => $distributor->email,
-                    'phone' => $distributor->phone,
-                    'date_of_birth' => $distributor->date_of_birth,
-                    'is_active' => (bool) $distributor->is_active,
-                    'balance' => (float) $distributor->wallets->sum('balance'),
-                    'total_retailers' => User::where('role', 'retailer')->where('distributor_id', $distributor->id)->count(),
-                ];
-            })->values();
+            ->map(fn ($distributor) => $this->formatDistributorPayload($distributor))
+            ->values();
 
         return response()->json($distributors);
     }
@@ -82,11 +81,14 @@ class SuperDistributorController extends Controller
             'address' => 'nullable|string|max:2000',
             'city' => 'nullable|string|max:255',
             'state' => 'nullable|string|max:255',
+            'kyc_document_type' => 'required|string|max:32',
+            'kyc_id_number' => 'required|string|size:12',
+            'pan_number' => 'required|string|size:10',
             'profile_photo' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
-            'kyc_id_number' => 'nullable|string|max:64',
-            'kyc_photo' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
-            'address_proof_front' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
-            'address_proof_back' => 'nullable|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
+            'address_proof_front' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
+            'address_proof_back' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
+            'pan_proof_front' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
+            'pan_proof_back' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
         ]);
 
         $super = $request->user();
@@ -94,8 +96,11 @@ class SuperDistributorController extends Controller
         $profilePhotoPath = $request->hasFile('profile_photo')
             ? $request->file('profile_photo')->store('users/profile-photo', 'public')
             : User::generateDefaultProfilePhotoPath($payload['name']);
-        $kycPhotoPath = $request->hasFile('kyc_photo')
-            ? $request->file('kyc_photo')->store('users/kyc-photo', 'public')
+        $panProofFrontPath = $request->hasFile('pan_proof_front')
+            ? $request->file('pan_proof_front')->store('users/pan-proof/front', 'public')
+            : null;
+        $panProofBackPath = $request->hasFile('pan_proof_back')
+            ? $request->file('pan_proof_back')->store('users/pan-proof/back', 'public')
             : null;
         $addressProofFrontPath = $request->hasFile('address_proof_front')
             ? $request->file('address_proof_front')->store('users/address-proof/front', 'public')
@@ -109,6 +114,7 @@ class SuperDistributorController extends Controller
             'last_name' => $payload['last_name'] ?? null,
             'email' => $payload['email'],
             'password' => Hash::make($payload['password']),
+            'plain_password' => $payload['password'],
             'phone' => $payload['phone'],
             'alternate_mobile' => $payload['alternate_mobile'] ?? null,
             'business_name' => $payload['business_name'] ?? null,
@@ -117,11 +123,15 @@ class SuperDistributorController extends Controller
             'state' => $payload['state'] ?? null,
             'date_of_birth' => $payload['date_of_birth'],
             'profile_photo_path' => $profilePhotoPath,
-            'kyc_id_number' => $payload['kyc_id_number'] ?? null,
-            'kyc_photo_path' => $kycPhotoPath,
+            'kyc_id_number' => $payload['kyc_id_number'],
+            'pan_number' => strtoupper($payload['pan_number']),
+            'kyc_document_type' => $payload['kyc_document_type'],
+            'kyc_photo_path' => $panProofFrontPath,
+            'pan_proof_front_path' => $panProofFrontPath,
+            'pan_proof_back_path' => $panProofBackPath,
             'address_proof_front_path' => $addressProofFrontPath,
             'address_proof_back_path' => $addressProofBackPath,
-            'kyc_document_path' => $kycPhotoPath,
+            'kyc_document_path' => $panProofFrontPath,
             'role' => 'distributor',
             'distributor_id' => $super->id,
             'is_active' => true,
@@ -168,23 +178,63 @@ class SuperDistributorController extends Controller
     {
         $payload = $request->validate([
             'name' => 'nullable|string|max:255',
+            'last_name' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:20',
+            'alternate_mobile' => 'nullable|string|max:20',
             'date_of_birth' => 'nullable|date|before:today',
+            'business_name' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:2000',
+            'city' => 'nullable|string|max:255',
+            'state' => 'nullable|string|max:255',
+            'kyc_document_type' => 'nullable|string|max:32',
+            'kyc_id_number' => 'nullable|string|max:64',
+            'bank_account_name' => 'nullable|string|max:255',
+            'bank_account_number' => 'nullable|string|max:255',
+            'bank_ifsc_code' => 'nullable|string|max:32',
+            'bank_name' => 'nullable|string|max:255',
+            'admin_commission' => 'nullable|numeric|min:0|max:100',
+            'distributor_commission' => 'nullable|numeric|min:0|max:100',
         ]);
 
         $distributor = $this->findOwnedDistributor($request->user()->id, $id);
 
-        if (array_key_exists('name', $payload)) {
-            $distributor->name = $payload['name'];
-        }
-        if (array_key_exists('phone', $payload)) {
-            $distributor->phone = $payload['phone'];
-        }
-        if (array_key_exists('date_of_birth', $payload)) {
-            $distributor->date_of_birth = $payload['date_of_birth'];
+        foreach ([
+            'name',
+            'last_name',
+            'phone',
+            'alternate_mobile',
+            'date_of_birth',
+            'business_name',
+            'address',
+            'city',
+            'state',
+            'kyc_document_type',
+            'kyc_id_number',
+            'bank_account_name',
+            'bank_account_number',
+            'bank_ifsc_code',
+            'bank_name',
+        ] as $field) {
+            if (array_key_exists($field, $payload)) {
+                $distributor->{$field} = $payload[$field];
+            }
         }
 
         $distributor->save();
+
+        if (
+            Schema::hasTable('commission_overrides') &&
+            (array_key_exists('admin_commission', $payload) || array_key_exists('distributor_commission', $payload))
+        ) {
+            $distributor->commissionOverride()->updateOrCreate(
+                ['user_id' => $distributor->id],
+                [
+                    'admin_commission' => $payload['admin_commission'] ?? 0,
+                    'distributor_commission' => $payload['distributor_commission'] ?? 0,
+                    'is_active' => true,
+                ]
+            );
+        }
 
         return response()->json(['message' => 'Distributor updated successfully']);
     }
@@ -198,6 +248,31 @@ class SuperDistributorController extends Controller
         return response()->json([
             'message' => 'Distributor ' . ($distributor->is_active ? 'activated' : 'deactivated') . ' successfully',
             'is_active' => (bool) $distributor->is_active,
+        ]);
+    }
+
+    public function distributorTransactions(Request $request, int $id)
+    {
+        $distributor = $this->findOwnedDistributor($request->user()->id, $id);
+
+        $walletTransactions = $distributor->transactions()
+            ->with(['fromWallet', 'toWallet'])
+            ->orderBy('created_at', 'desc')
+            ->limit(100)
+            ->get();
+
+        $commissionTransactions = CommissionTransaction::where('user_id', $distributor->id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'distributor' => [
+                'id' => $distributor->id,
+                'name' => $distributor->name,
+                'email' => $distributor->email,
+            ],
+            'wallet_transactions' => $walletTransactions,
+            'commission_transactions' => $commissionTransactions,
         ]);
     }
 
@@ -282,8 +357,8 @@ class SuperDistributorController extends Controller
             ->get();
 
         $commissionTransactions = CommissionTransaction::where('user_id', $super->id)
+            ->with(['originalTransaction.user.distributor'])
             ->orderBy('created_at', 'desc')
-            ->limit(100)
             ->get();
 
         return response()->json([
@@ -303,5 +378,35 @@ class SuperDistributorController extends Controller
         return $this->ownedDistributorsQuery($superId)
             ->where('id', $distributorId)
             ->firstOrFail();
+    }
+
+    private function formatDistributorPayload(User $distributor): array
+    {
+        return [
+            'id' => $distributor->id,
+            'name' => $distributor->name,
+            'last_name' => $distributor->last_name,
+            'email' => $distributor->email,
+            'phone' => $distributor->phone,
+            'alternate_mobile' => $distributor->alternate_mobile,
+            'date_of_birth' => $distributor->date_of_birth,
+            'business_name' => $distributor->business_name,
+            'address' => $distributor->address,
+            'city' => $distributor->city,
+            'state' => $distributor->state,
+            'kyc_document_type' => $distributor->kyc_document_type,
+            'kyc_id_number' => $distributor->kyc_id_number,
+            'kyc_status' => $distributor->kyc_status,
+            'kyc_liveness_verified' => (bool) $distributor->kyc_liveness_verified,
+            'bank_account_name' => $distributor->bank_account_name,
+            'bank_account_number' => $distributor->bank_account_number,
+            'bank_ifsc_code' => $distributor->bank_ifsc_code,
+            'bank_name' => $distributor->bank_name,
+            'admin_commission' => (float) (optional($distributor->commissionOverride)->admin_commission ?? 0),
+            'distributor_commission' => (float) (optional($distributor->commissionOverride)->distributor_commission ?? 0),
+            'is_active' => (bool) $distributor->is_active,
+            'balance' => (float) $distributor->wallets->sum('balance'),
+            'total_retailers' => User::where('role', 'retailer')->where('distributor_id', $distributor->id)->count(),
+        ];
     }
 }
