@@ -32,6 +32,8 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Master Distributor User',
                 'password' => Hash::make('password'),
+                'plain_password' => 'password',
+                'phone' => '9876543212',
                 'role' => 'master_distributor',
                 'is_active' => true,
             ]
@@ -53,6 +55,8 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Super Distributor User',
                 'password' => Hash::make('password'),
+                'plain_password' => 'password',
+                'phone' => '9876543213',
                 'role' => 'super_distributor',
                 'distributor_id' => $master->id,
                 'is_active' => true,
@@ -86,6 +90,8 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Distributor User',
                 'password' => Hash::make('password'),
+                'plain_password' => 'password',
+                'phone' => '9876543214',
                 'role' => 'distributor',
                 'distributor_id' => $super->id,
                 'is_active' => true,
@@ -109,6 +115,8 @@ class TestUsersSeeder extends Seeder
             [
                 'name' => 'Retailer User',
                 'password' => Hash::make('password'),
+                'plain_password' => 'password',
+                'phone' => '9876543215',
                 'role' => 'retailer',
                 'distributor_id' => $distributor->id,
                 'is_active' => true,

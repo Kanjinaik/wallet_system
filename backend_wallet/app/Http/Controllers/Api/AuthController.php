@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminSetting;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
@@ -16,6 +19,8 @@ use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
+    private const FRONTEND_DISABLED_MESSAGE = 'Admin stop the server contact to admin';
+
     public function register(Request $request)
     {
         try {
@@ -48,6 +53,7 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+            'plain_password' => null,
             'phone' => $request->phone,
             'role' => $request->input('role', 'user'),
             'profile_photo_path' => User::generateDefaultProfilePhotoPath($request->name),
@@ -73,17 +79,17 @@ class AuthController extends Controller
         $user->walletLimits()->createMany([
             [
                 'limit_type' => 'daily',
-                'max_amount' => 10000,
+                'max_amount' => 500000,
                 'reset_date' => now()->toDateString(),
             ],
             [
                 'limit_type' => 'monthly',
-                'max_amount' => 100000,
+                'max_amount' => 500000,
                 'reset_date' => now()->startOfMonth()->toDateString(),
             ],
             [
                 'limit_type' => 'per_transaction',
-                'max_amount' => 50000,
+                'max_amount' => 500000,
             ],
         ]);
 
@@ -107,18 +113,34 @@ class AuthController extends Controller
     {
         try {
         $validator = Validator::make($request->all(), [
-            'email' => 'required|email',
+            'agent_id' => 'nullable|string|max:50',
+            'email' => 'nullable|string|max:255',
+            'login' => 'nullable|string|max:255',
             'password' => 'required',
+            'role' => 'nullable|in:user,admin,master_distributor,super_distributor,distributor,retailer',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::where('email', $request->email)->first();
+        $identifier = trim((string) ($request->agent_id ?? $request->login ?? $request->email ?? ''));
+        if ($identifier === '') {
+            return response()->json([
+                'errors' => [
+                    'agent_id' => ['Agent ID is required.'],
+                ],
+            ], 422);
+        }
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        $user = $this->resolveLoginUser($identifier);
+
+        if (!$user || !$this->passwordMatches($user, (string) $request->password)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
+        }
+
+        if (!$this->isFrontendEnabled() && $user->role !== 'admin') {
+            return response()->json(['message' => self::FRONTEND_DISABLED_MESSAGE], 403);
         }
 
         if (!$user->is_active) {
@@ -139,6 +161,86 @@ class AuthController extends Controller
                 'error_code' => $e->getCode(),
             ], 500);
         }
+    }
+
+
+    public function frontendStatus()
+    {
+        $enabled = $this->isFrontendEnabled();
+
+        return response()->json([
+            'frontend_enabled' => $enabled,
+            'message' => $enabled ? 'Frontend is active' : self::FRONTEND_DISABLED_MESSAGE,
+        ]);
+    }
+
+    private function resolveLoginUser(string $identifier): ?User
+    {
+        $normalized = trim($identifier);
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (filter_var($normalized, FILTER_VALIDATE_EMAIL)) {
+            return User::where('email', $normalized)->first();
+        }
+
+        $phoneUser = User::where('phone', $normalized)
+            ->orWhere('alternate_mobile', $normalized)
+            ->first();
+
+        if ($phoneUser) {
+            return $phoneUser;
+        }
+
+        $normalized = strtoupper(str_replace(' ', '', $normalized));
+        if (preg_match('/^XT[A-Z]{2}(\d+)$/', $normalized, $matches) !== 1) {
+            return null;
+        }
+
+        $user = User::find((int) $matches[1]);
+        if (!$user) {
+            return null;
+        }
+
+        return strtoupper($user->agent_id) === $normalized ? $user : null;
+    }
+
+    private function passwordMatches(User $user, string $inputPassword): bool
+    {
+        $storedPassword = (string) ($user->password ?? '');
+
+        if ($storedPassword !== '' && Hash::check($inputPassword, $storedPassword)) {
+            return true;
+        }
+
+        $plainPassword = (string) ($user->plain_password ?? '');
+        if ($plainPassword !== '' && hash_equals($plainPassword, $inputPassword)) {
+            $this->upgradeUserPasswordHash($user, $inputPassword);
+
+            return true;
+        }
+
+        if ($storedPassword !== '' && hash_equals($storedPassword, $inputPassword)) {
+            $this->upgradeUserPasswordHash($user, $inputPassword);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private function upgradeUserPasswordHash(User $user, string $plainPassword): void
+    {
+        $user->forceFill([
+            'password' => Hash::make($plainPassword),
+            'plain_password' => $plainPassword,
+        ])->save();
+    }
+
+    private function isFrontendEnabled(): bool
+    {
+        return AdminSetting::getValue('sys_frontend_enabled', '1') === '1';
     }
 
     public function logout(Request $request)
@@ -184,12 +286,25 @@ class AuthController extends Controller
             ]
         );
 
-        // Returning token helps local/test flows without mail setup.
+        if ($this->shouldExposeDevelopmentSecrets()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Reset token generated successfully.',
+                'reset_token' => $token,
+                'email' => $user->email,
+            ]);
+        }
+
+        if (!$this->sendPasswordResetToken($user, $token)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to send reset instructions right now. Please try again later or contact support.',
+            ], 503);
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Reset token generated successfully.',
-            'reset_token' => $token,
-            'email' => $user->email,
+            'message' => 'If this email exists, reset instructions have been sent.',
         ]);
     }
 
@@ -229,6 +344,7 @@ class AuthController extends Controller
         }
 
         $user->password = Hash::make($request->password);
+        $user->plain_password = null;
         $user->save();
 
         DB::table('password_reset_tokens')->where('email', $request->email)->delete();
@@ -242,5 +358,33 @@ class AuthController extends Controller
     public function profile(Request $request)
     {
         return response()->json($request->user()->fresh());
+    }
+
+    private function shouldExposeDevelopmentSecrets(): bool
+    {
+        return app()->environment('local') || (bool) config('app.debug');
+    }
+
+    private function sendPasswordResetToken(User $user, string $token): bool
+    {
+        try {
+            Mail::raw(
+                "Your password reset token is: {$token}\nThis token will expire in 30 minutes.",
+                function ($message) use ($user) {
+                    $message->to($user->email)
+                        ->subject(config('app.name', 'Wallet System') . ' Password Reset Token');
+                }
+            );
+
+            return true;
+        } catch (\Throwable $exception) {
+            Log::error('Failed to send password reset token email.', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 }
