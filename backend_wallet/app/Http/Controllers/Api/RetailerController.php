@@ -9,8 +9,10 @@ use App\Models\CommissionTransaction;
 use App\Models\Transaction;
 use App\Models\UserNotification;
 use App\Models\WithdrawRequest;
+use App\Services\BillAvenueBbpsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 
 class RetailerController extends Controller
@@ -18,15 +20,32 @@ class RetailerController extends Controller
     public function dashboard(Request $request)
     {
         $user = $request->user();
-        $walletBalance = (float) $user->wallets()->sum('balance');
-        $minWithdraw = (float) AdminSetting::getValue('withdraw_min_amount', 100);
+        $walletBalance = Schema::hasTable('wallets') ? (float) $user->wallets()->sum('balance') : 0.0;
+        $minWithdraw = Schema::hasTable('admin_settings')
+            ? (float) AdminSetting::getValue('withdraw_min_amount', 100)
+            : 100.0;
         $availableWithdraw = max(0, $walletBalance);
-        $commission = CommissionConfig::calculateForUser($user, 100.0);
+        $commission = (Schema::hasTable('commission_configs') && Schema::hasTable('commission_overrides'))
+            ? CommissionConfig::calculateForUser($user, 100.0)
+            : [
+                'admin_commission_percentage' => 0,
+                'distributor_commission_percentage' => 0,
+            ];
+
+        try {
+            $rechargeGateway = app(BillAvenueBbpsService::class)->connectionSummary();
+        } catch (\Throwable $exception) {
+            $rechargeGateway = [
+                'configured' => false,
+                'message' => 'Recharge gateway unavailable',
+            ];
+        }
 
         return response()->json([
             'wallet_balance' => $walletBalance,
             'available_withdraw_amount' => $availableWithdraw,
             'min_withdraw_amount' => $minWithdraw,
+            'recharge_gateway' => $rechargeGateway,
             'commission_breakdown' => [
                 'admin_commission_percentage' => (float) ($commission['admin_commission_percentage'] ?? 0),
                 'distributor_commission_percentage' => (float) ($commission['distributor_commission_percentage'] ?? 0),
@@ -35,14 +54,20 @@ class RetailerController extends Controller
                     2
                 ),
             ],
-            'withdraw_requests_pending' => WithdrawRequest::where('user_id', $user->id)
-                ->whereIn('status', ['pending', 'approved'])
-                ->count(),
+            'withdraw_requests_pending' => Schema::hasTable('withdraw_requests')
+                ? WithdrawRequest::where('user_id', $user->id)
+                    ->whereIn('status', ['pending', 'approved'])
+                    ->count()
+                : 0,
         ]);
     }
 
     public function withdrawRequests(Request $request)
     {
+        if (!Schema::hasTable('withdraw_requests')) {
+            return response()->json([]);
+        }
+
         $requests = WithdrawRequest::where('user_id', $request->user()->id)
             ->orderBy('created_at', 'desc')
             ->limit(200)
@@ -53,6 +78,10 @@ class RetailerController extends Controller
 
     public function notifications(Request $request)
     {
+        if (!Schema::hasTable('user_notifications')) {
+            return response()->json([]);
+        }
+
         $notifications = $request->user()->notifications()
             ->orderBy('created_at', 'desc')
             ->limit(200)
@@ -119,6 +148,7 @@ class RetailerController extends Controller
         }
 
         $user->password = Hash::make($payload['new_password']);
+        $user->plain_password = null;
         $user->save();
 
         return response()->json(['message' => 'Password changed successfully']);
@@ -197,7 +227,7 @@ class RetailerController extends Controller
         $payload = $request->validate([
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
-            'type' => 'nullable|in:deposit,withdraw,transfer,commission',
+            'type' => 'nullable|in:deposit,withdraw,transfer,recharge,commission',
         ]);
 
         $startDate = $payload['start_date'] ?? null;
@@ -257,6 +287,10 @@ class RetailerController extends Controller
 
     public static function notify(int $userId, string $type, string $title, string $message, array $metadata = []): void
     {
+        if (!Schema::hasTable('user_notifications')) {
+            return;
+        }
+
         UserNotification::create([
             'user_id' => $userId,
             'type' => $type,

@@ -7,11 +7,16 @@ use App\Models\Wallet;
 use App\Models\WalletLimit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class WalletController extends Controller
 {
     public function index(Request $request)
     {
+        if (!Schema::hasTable('wallets')) {
+            return response()->json([]);
+        }
+
         $wallets = $request->user()->wallets()->get();
         return response()->json($wallets);
     }
@@ -46,7 +51,6 @@ class WalletController extends Controller
         ]);
 
         $wallet = $request->user()->wallets()->findOrFail($id);
-        
         $wallet->update([
             'is_frozen' => $request->is_frozen,
             'freeze_reason' => $request->is_frozen ? $request->reason : null,
@@ -70,6 +74,10 @@ class WalletController extends Controller
 
     public function limits(Request $request)
     {
+        if (!Schema::hasTable('wallet_limits')) {
+            return response()->json([]);
+        }
+
         $limits = $request->user()->walletLimits()->get();
         return response()->json($limits);
     }
@@ -94,6 +102,10 @@ class WalletController extends Controller
 
     public function checkLimits(Request $request)
     {
+        if (!Schema::hasTable('wallet_limits')) {
+            return response()->json(['can_proceed' => true]);
+        }
+
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
             'type' => 'required|in:daily,monthly,per_transaction',

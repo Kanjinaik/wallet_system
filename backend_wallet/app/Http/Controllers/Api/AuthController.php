@@ -357,7 +357,33 @@ class AuthController extends Controller
 
     public function profile(Request $request)
     {
-        return response()->json($request->user()->fresh());
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $freshUser = User::query()->find($user->id) ?? $user;
+
+        return response()->json([
+            'id' => $freshUser->id,
+            'name' => $freshUser->name,
+            'last_name' => Schema::hasColumn('users', 'last_name') ? $freshUser->last_name : null,
+            'email' => $freshUser->email,
+            'phone' => Schema::hasColumn('users', 'phone') ? $freshUser->phone : null,
+            'alternate_mobile' => Schema::hasColumn('users', 'alternate_mobile') ? $freshUser->alternate_mobile : null,
+            'date_of_birth' => Schema::hasColumn('users', 'date_of_birth') ? $freshUser->date_of_birth : null,
+            'role' => $freshUser->role,
+            'is_active' => (bool) $freshUser->is_active,
+            'profile_photo_path' => Schema::hasColumn('users', 'profile_photo_path') ? $freshUser->profile_photo_path : null,
+            'profile_photo_url' => Schema::hasColumn('users', 'profile_photo_path') ? $freshUser->profile_photo_url : null,
+            'agent_id' => $freshUser->agent_id,
+            'bank_account_name' => Schema::hasColumn('users', 'bank_account_name') ? $freshUser->bank_account_name : null,
+            'bank_account_number' => Schema::hasColumn('users', 'bank_account_number') ? $freshUser->bank_account_number : null,
+            'bank_ifsc_code' => Schema::hasColumn('users', 'bank_ifsc_code') ? $freshUser->bank_ifsc_code : null,
+            'bank_name' => Schema::hasColumn('users', 'bank_name') ? $freshUser->bank_name : null,
+            'kyc_status' => Schema::hasColumn('users', 'kyc_status') ? $freshUser->kyc_status : null,
+        ]);
     }
 
     private function shouldExposeDevelopmentSecrets(): bool
